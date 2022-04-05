@@ -15,7 +15,8 @@ struct Pixel {
     
     Pixel() {};
 
-    Pixel(uint8_t r, uint8_t g, uint8_t b) : r(r), g(g), b(b) {}
+    Pixel(uint8_t r, uint8_t g, uint8_t b)
+        : r(r), g(g), b(b) {}
     
     Pixel(uint8_t * ptr) {
         r = *ptr;
@@ -27,11 +28,15 @@ struct Pixel {
         return (r == p.r) && (g == p.g) && (b == p.b);
     }
 
-   inline int hash() {
+    inline int hash1() {
+        return (3 * r + 5 * g + 7 * b) & 0x1F;
+    } 
+
+   inline int hash2() {
         int R = r, G = g, B = b;
-        return (((R + 3 * G + 5 * B) << 10) +
-                ((11 * R + 13 * G + 7 * B) << 5) +
-                (23 * R + 17 * G + 19 * B)) % (1 << 14);
+        return (((R + 3 * G + 5 * B) << 8) +
+                ((11 * R + 13 * G + 7 * B) << 4) +
+                (23 * R + 17 * G + 19 * B)) & 0x1FFF;
     }
 };
 
@@ -58,7 +63,6 @@ void decode(std::string inp_name, std::string out_name) {
     }
     for (int i = 0; i < 4; i++) {
         uint8_t byte = buffer[idx++];
-        inp >> byte;
         h = (h << 8) | byte;
     }
     uint8_t ch = buffer[idx++];
@@ -67,7 +71,7 @@ void decode(std::string inp_name, std::string out_name) {
     assert(cs == 0x00 || cs == 0x01);
 
     Pixel prev;
-    Pixel table[1 << 14];
+    Pixel table1[1<<13], table2[1<<5];
     std::vector<uint8_t> out;
     out.reserve(ch * w * h);
     while (out.size() < ch * h * w) {
@@ -80,17 +84,26 @@ void decode(std::string inp_name, std::string out_name) {
             out.push_back(p.r);
             out.push_back(p.g);
             out.push_back(p.b);
-            table[p.hash()] = p;
+            table1[p.hash1()] = p;
+            table2[p.hash2()] = p;
             prev = p;
-        } else if ((byte & 0xC0) == 0x00) {
-            int index = byte << 8;
-            byte = buffer[idx++];
-            index |= byte;
-            Pixel p = table[index];
+        } else if ((byte & 0xE0) == 0x00) {
+            Pixel p = table1[byte];
             out.push_back(p.r);
             out.push_back(p.g);
             out.push_back(p.b);
             prev = p;
+            table2[p.hash2()] = p;
+        } else if ((byte & 0xE0) == 0x20) {
+            int index = (byte & 0x1F) << 8;
+            byte = buffer[idx++];
+            index |= byte;
+            Pixel p = table2[index];
+            out.push_back(p.r);
+            out.push_back(p.g);
+            out.push_back(p.b);
+            prev = p;
+            table1[p.hash1()] = p;
         } else if ((byte & 0xC0) == 0x40) {
             uint8_t dr = ((byte & 0x30) >> 4) - 2;
             uint8_t dg = ((byte & 0x0C) >> 2) - 2;
@@ -99,7 +112,8 @@ void decode(std::string inp_name, std::string out_name) {
             out.push_back(p.r);
             out.push_back(p.g);
             out.push_back(p.b);
-            table[p.hash()] = p;
+            table1[p.hash1()] = p;
+            table2[p.hash2()] = p;
             prev = p;
         } else if ((byte & 0xC0) == 0x80) {
             uint8_t dg = (byte & 0x3F) - 32;
@@ -110,7 +124,8 @@ void decode(std::string inp_name, std::string out_name) {
             out.push_back(p.r);
             out.push_back(p.g);
             out.push_back(p.b);
-            table[p.hash()] = p;
+            table1[p.hash1()] = p;
+            table2[p.hash2()] = p;
             prev = p;
         } else if ((byte & 0xC0) == 0xC0) {
             uint8_t run = (byte & 0x3F) + 1;
@@ -136,7 +151,7 @@ void decode(std::string inp_name, std::string out_name) {
 
 void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
     Pixel prev;
-    Pixel table[1 << 14];
+    Pixel table1[1<<13], table2[1<<5];
     std::vector<uint8_t> out;
     static const std::string magic = "qoif";
     for (char c : magic) {
@@ -157,11 +172,12 @@ void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
     out.push_back(p.g);
     out.push_back(p.b);
     prev = p;
-    table[p.hash()] = p;
+    table1[p.hash1()] = p;
+    table2[p.hash2()] = p;
     for (int i = 1; i < h * w; i++) {
         uint8_t *ptr = image + (3 * i);
         Pixel p(ptr);
-        int hash = p.hash();
+        int hash1 = p.hash1(), hash2 = p.hash2();
         if (p == prev) {
             int run = 1;
             while (run < 62 && i + 1 < h * w) {
@@ -174,9 +190,9 @@ void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
             }
             uint8_t byte = (3 << 6) | (run - 1);
             out.push_back(byte);
-        } else if (table[hash] == p) {
-            out.push_back(hash >> 8);
-            out.push_back(hash & 0xFF);
+        } else if (table1[hash1] == p) {
+            out.push_back(hash1);
+            table2[hash2] = p;
             prev = p;
         } else {
             int dr = int (p.r) - prev.r;
@@ -185,6 +201,9 @@ void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
             if (-2 <= dr && dr < 2  && -2 <= dg && dg < 2  && -2 <= db && db < 2) {
                 uint8_t byte = (1 << 6) | ((dr + 2) << 4) | ((dg + 2) << 2) | (db + 2);
                 out.push_back(byte);
+            } else if (table2[hash2] == p) {
+                out.push_back((hash2 >> 8) | 0x20);
+                out.push_back(hash2 & 0xFF);
             } else if (-32 <= dg && dg < 32 
                         && -8 <= (dr-dg) && (dr-dg) < 8
                         && -8 <= (db-dg) && (db-dg) < 8) {
@@ -199,7 +218,8 @@ void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
                 out.push_back(p.b);
             }
             prev = p;
-            table[hash] = p;
+            table1[hash1] = p;
+            table2[hash2] = p;
         }
     }
     for (int i = 0; i < 7; i++) {
@@ -211,10 +231,9 @@ void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
 
 int main() {
     int width, height, bpp;
-    uint8_t* rgb_image = stbi_load("img/2.png", &width, &height, &bpp, 3);
-    encode(rgb_image, width, height, "img/2.qoi");
+    uint8_t* rgb_image = stbi_load("img/1.png", &width, &height, &bpp, 3);
+    encode(rgb_image, width, height, "img/1_large.qoi");
     stbi_image_free(rgb_image);
-    decode("img/2.qoi", "img/2_out.png");
+    decode("img/1_large.qoi", "img/1_out.png");
     return 0;
 }
-

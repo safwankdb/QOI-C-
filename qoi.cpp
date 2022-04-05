@@ -15,7 +15,8 @@ struct Pixel {
     
     Pixel() {};
 
-    Pixel(uint8_t r, uint8_t g, uint8_t b) : r(r), g(g), b(b) {}
+    Pixel(uint8_t r, uint8_t g, uint8_t b)
+        : r(r), g(g), b(b) {}
     
     Pixel(uint8_t * ptr) {
         r = *ptr;
@@ -28,9 +29,8 @@ struct Pixel {
     }
 
     inline uint8_t hash() {
-        return (3 * r + 5 * g + 7 * b) % 64;
+        return (3 * r + 5 * g + 7 * b) & 0x3F;
     }
-
 };
 
 void decode(std::string inp_name, std::string out_name) {
@@ -56,7 +56,6 @@ void decode(std::string inp_name, std::string out_name) {
     }
     for (int i = 0; i < 4; i++) {
         uint8_t byte = buffer[idx++];
-        inp >> byte;
         h = (h << 8) | byte;
     }
     uint8_t ch = buffer[idx++];
