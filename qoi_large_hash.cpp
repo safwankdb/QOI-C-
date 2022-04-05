@@ -206,15 +206,15 @@ void encode(uint8_t * image, uint32_t w, uint32_t h, std::string name) {
         out.push_back(0x00);
     }
     out.push_back(0x01);
-    name += ".qoi";
     std::ofstream(name, std::ios::binary).write((const char *) &out[0], out.size());
 }
 
 int main() {
     int width, height, bpp;
-    uint8_t* rgb_image = stbi_load("lena.png", &width, &height, &bpp, 3);
-    encode(rgb_image, width, height, "lena");
+    uint8_t* rgb_image = stbi_load("img/2.png", &width, &height, &bpp, 3);
+    encode(rgb_image, width, height, "img/2.qoi");
     stbi_image_free(rgb_image);
-    decode("lena.qoi", "lena_out.png");
+    decode("img/2.qoi", "img/2_out.png");
     return 0;
 }
+
